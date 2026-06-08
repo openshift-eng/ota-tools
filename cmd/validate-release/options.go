@@ -31,18 +31,21 @@ func GetOptionsFromEnv() (*Options, error) {
 	if pullBaseRef == "" {
 		return nil, fmt.Errorf("PULL_BASE_REF environment variable not set")
 	}
-	pullNumber := os.Getenv("PULL_NUMBER")
-	if pullNumber == "" {
-		return nil, fmt.Errorf("PULL_NUMBER environment variable not set")
-	}
-	i, err := strconv.Atoi(pullNumber)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert PULL_NUMBER environment variable to int")
-	}
-	return &Options{
+	ret := &Options{
 		PullBaseRef: pullBaseRef,
-		PullNumber:  i,
-	}, nil
+		PullNumber:  -1,
+	}
+
+	if pullNumber := os.Getenv("PULL_NUMBER"); pullNumber != "" {
+		i, err := strconv.Atoi(pullNumber)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert PULL_NUMBER environment variable %s to int", pullNumber)
+		}
+		ret.PullNumber = i
+	} else {
+		logrus.Info("PULL_NUMBER environment variable not set: likely running in a Batch job")
+	}
+	return ret, nil
 }
 
 type Candidate struct {
@@ -82,7 +85,7 @@ func (o *Options) Run(ctx context.Context) error {
 		}
 	}
 
-	if raw == nil {
+	if raw == nil && o.PullNumber != -1 {
 		logrus.WithField("path", path).Info("Fetching the file from GitHub")
 		pr, _, err := githubClient.PullRequests.Get(ctx, org, repo, o.PullNumber)
 		if err != nil {
@@ -104,6 +107,10 @@ func (o *Options) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to get file content: %w", err)
 		}
 		raw = []byte(content)
+	}
+
+	if raw == nil {
+		return fmt.Errorf("failed to get the content to merge: %s", path)
 	}
 
 	var pullCandidate Candidate
